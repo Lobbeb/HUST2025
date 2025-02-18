@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>HUST - Dynamic Real-Time Dashboard</title>
+  <!-- Bootstrap 5 CSS (CDN) -->
+  <link 
+    href="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/css/bootstrap.min.css" 
+    rel="stylesheet"
+  >
+  
+  <!-- Chart.js (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  
+  <!-- Socket.IO (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/socket.io-client@3/dist/socket.io.min.js"></script>
+  
+  <!-- html2canvas (CDN) for Screenshot -->
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+
+  <style>
+    body {
+      padding: 20px;
+      transition: background-color 0.3s, color 0.3s;
+    }
+    .dark-mode {
+      background-color: #1e1e1e;
+      color: #f5f5f5;
+    }
+    .chart-container {
+      width: 100%;
+      max-width: 700px;
+      margin: 20px auto;
+    }
+    /* Chart background in dark mode */
+    canvas {
+      background: #2b2b2b;
+    }
+  </style>
+</head>
+<body class="light-mode">
+  <div class="container-fluid">
+    <!-- Header Row -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+      <h1 class="mb-0">HUST - Dynamic Real-Time Dashboard</h1>
+      <button id="toggle-mode-btn" class="btn btn-secondary">Toggle Dark/Light Mode</button>
+    </div>
+
+    <!-- Control Bar -->
+    <div class="row mb-3">
+      <div class="col">
+        <!-- Time-Range (demo only) -->
+        <select id="time-range" class="form-select w-auto">
+          <option value="10">Last 10 rows</option>
+          <option value="20" selected>Last 20 rows</option>
+          <option value="50">Last 50 rows</option>
+        </select>
+      </div>
+      <div class="col">
+        <!-- CSV Export -->
+        <a href="/export_csv" class="btn btn-outline-primary">Export CSV</a>
+      </div>
+      <div class="col">
+        <!-- Screenshot -->
+        <button id="screenshot-btn" class="btn btn-outline-success">Download Screenshot</button>
+      </div>
+    </div>
+
+    <!-- ======================
+         BATTERY CHART
+    ======================= -->
+    <div class="row mb-4">
+      <div class="col chart-container">
+        <div class="d-flex justify-content-between align-items-center">
+          <h4>Battery Chart</h4>
+          <!-- Dropdown to pick the Battery column to plot -->
+          <select id="battery-select" class="form-select w-auto">
+            <option value="battery_volt" selected>Battery Voltage</option>
+            <option value="battery_current">Battery Current</option>
+            <option value="battery_cell_low_volt">Cell Low Volt</option>
+            <option value="battery_cell_high_volt">Cell High Volt</option>
+            <option value="battery_cell_average_volt">Cell Avg Volt</option>
+            <option value="battery_cell_low_temp">Cell Low Temp</option>
+            <option value="battery_cell_high_temp">Cell High Temp</option>
+            <option value="battery_cell_average_temp">Cell Avg Temp</option>
+          </select>
+        </div>
+        <canvas id="batteryChart"></canvas>
+      </div>
+    </div>
+
+    <!-- ======================
+         MOTOR CHART
+    ======================= -->
+    <div class="row mb-4">
+      <div class="col chart-container">
+        <div class="d-flex justify-content-between align-items-center">
+          <h4>Motor Chart</h4>
+          <!-- Dropdown to pick the Motor column to plot -->
+          <select id="motor-select" class="form-select w-auto">
+            <option value="motor_temp" selected>Motor Temp</option>
+            <option value="motor_current">Motor Current</option>
+            <option value="motor_controller_temp">Motor Controller Temp</option>
+          </select>
+        </div>
+        <canvas id="motorChart"></canvas>
+      </div>
+    </div>
+
+    <!-- ======================
+         MPPT CHART
+    ======================= -->
+    <div class="row mb-4">
+      <div class="col chart-container">
+        <div class="d-flex justify-content-between align-items-center">
+          <h4>MPPT Chart</h4>
+          <!-- Dropdown to pick the MPPT column to plot -->
+          <select id="mppt-select" class="form-select w-auto">
+            <option value="MPPT_total_watt" selected>Total Watt</option>
+            <option value="MPPT1_watt">MPPT1 Watt</option>
+            <option value="MPPT2_watt">MPPT2 Watt</option>
+            <option value="MPPT3_watt">MPPT3 Watt</option>
+          </select>
+        </div>
+        <canvas id="mpptChart"></canvas>
+      </div>
+    </div>
+
+    <!-- ======================
+         VEHICLE CHART
+    ======================= -->
+    <div class="row mb-4">
+      <div class="col chart-container">
+        <div class="d-flex justify-content-between align-items-center">
+          <h4>Vehicle Chart</h4>
+          <!-- Dropdown to pick the Vehicle column to plot -->
+          <select id="vehicle-select" class="form-select w-auto">
+            <option value="velocity" selected>Velocity</option>
+            <option value="distance_travelled">Distance Travelled</option>
+          </select>
+        </div>
+        <canvas id="vehicleChart"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==============
+       MAIN SCRIPT
+  =============== -->
+  <script>
+    // Socket.IO Connection
+    const socket = io(location.protocol + "//" + document.domain + ":" + location.port);
+
+    // Chart.js references
+    let batteryChart, motorChart, mpptChart, vehicleChart;
+
+    // On DOM load
+    document.addEventListener("DOMContentLoaded", () => {
+      // Initialize charts
+      batteryChart = createLineChart("batteryChart", "blue", "Battery Volt");
+      motorChart   = createLineChart("motorChart", "red", "Motor Temp");
+      mpptChart    = createLineChart("mpptChart", "green", "MPPT Total Watt");
+      vehicleChart = createLineChart("vehicleChart", "orange", "Velocity");
+
+      // Listen for real-time data
+      socket.on("new_data", (data) => {
+        updateCharts(data);
+      });
+
+      // Toggle Dark/Light Mode
+      document.getElementById("toggle-mode-btn").addEventListener("click", toggleMode);
+
+      // Screenshot button
+      document.getElementById("screenshot-btn").addEventListener("click", downloadScreenshot);
+
+      // Time-range selector (demo only)
+      document.getElementById("time-range").addEventListener("change", (e) => {
+        const limit = e.target.value;
+        alert(`Time-Range changed to last ${limit} rows (demo only).`);
+      });
+
+      // If you want to change column dynamically, re-draw after user picks a new column:
+      document.getElementById("battery-select").addEventListener("change", () => { updateCharts(); });
+      document.getElementById("motor-select").addEventListener("change", () => { updateCharts(); });
+      document.getElementById("mppt-select").addEventListener("change", () => { updateCharts(); });
+      document.getElementById("vehicle-select").addEventListener("change", () => { updateCharts(); });
+    });
+
+    // Create a generic line chart
+    function createLineChart(canvasId, color, label) {
+      const ctx = document.getElementById(canvasId).getContext("2d");
+      return new Chart(ctx, {
+        type: "line",
+        data: {
+          labels: [],
+          datasets: [{
+            label: label,
+            data: [],
+            borderColor: color,
+            fill: false
+          }]
+        },
+        options: { responsive: true }
+      });
+    }
+
+    // Toggle Dark/Light Mode
+    function toggleMode() {
+      document.body.classList.toggle("dark-mode");
+    }
+
+    // Download screenshot of entire page
+    function downloadScreenshot() {
+      html2canvas(document.body).then(canvas => {
+        const link = document.createElement("a");
+        link.download = "hust_dashboard_screenshot.png";
+        link.href = canvas.toDataURL("image/png");
+        link.click();
+      });
+    }
+
+    // The main function to update all four charts
+    // 'data' can be passed from socket, or if undefined, we re-use the last data we stored.
+    let lastData = null; // Keep track of last data globally
+
+    function updateCharts(data) {
+      // If no data provided (e.g. user changed dropdown),
+      // use the last data we received from Socket.IO
+      if (data) {
+        lastData = data;
+      } else {
+        data = lastData;
+      }
+      if (!data) return; // No data yet
+
+      // Reverse rows so oldest -> newest
+      const batteryRows = (data.battery_data || []).slice().reverse();
+      const motorRows   = (data.motor_data || []).slice().reverse();
+      const mpptRows    = (data.mppt_data || []).slice().reverse();
+      const vehicleRows = (data.vehicle_data || []).slice().reverse();
+
+      // ========== Battery Chart ==========
+      const batteryColumn = document.getElementById("battery-select").value;
+      batteryChart.data.labels = batteryRows.map(r => r.timestamp);
+      batteryChart.data.datasets[0].label = batteryColumn; // Set label dynamically
+      batteryChart.data.datasets[0].data  = batteryRows.map(r => r[batteryColumn]);
+      batteryChart.update();
+
+      // ========== Motor Chart ==========
+      const motorColumn = document.getElementById("motor-select").value;
+      motorChart.data.labels = motorRows.map(r => r.timestamp);
+      motorChart.data.datasets[0].label = motorColumn;
+      motorChart.data.datasets[0].data  = motorRows.map(r => r[motorColumn]);
+      motorChart.update();
+
+      // ========== MPPT Chart ==========
+      const mpptColumn = document.getElementById("mppt-select").value;
+      mpptChart.data.labels = mpptRows.map(r => r.timestamp);
+      mpptChart.data.datasets[0].label = mpptColumn;
+      mpptChart.data.datasets[0].data  = mpptRows.map(r => r[mpptColumn]);
+      mpptChart.update();
+
+      // ========== Vehicle Chart ==========
+      const vehicleColumn = document.getElementById("vehicle-select").value;
+      vehicleChart.data.labels = vehicleRows.map(r => r.timestamp);
+      vehicleChart.data.datasets[0].label = vehicleColumn;
+      vehicleChart.data.datasets[0].data  = vehicleRows.map(r => r[vehicleColumn]);
+      vehicleChart.update();
+    }
+  </script>
+
+  <!-- Bootstrap JS (CDN) -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.2.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
